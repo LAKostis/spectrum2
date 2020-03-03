@@ -428,11 +428,15 @@ class SpectrumNetworkPlugin : public NetworkPlugin {
 				adminLegacyName = "steam-mobile";
 				adminAlias = "steam-mobile";
 			}
-            else if (protocol == "prpl-eionrobb-discord") {
-                adminLegacyName = "discord";
-                adminAlias = "discord";
-            }
-
+			else if (protocol == "prpl-eionrobb-discord") {
+				adminLegacyName = "discord";
+				adminAlias = "discord";
+			}
+			else if (protocol == "prpl-telegram") {
+				adminLegacyName = "Telegram";
+				adminAlias = "Telegram";
+			}
+			
 			if (!purple_find_prpl_wrapped(protocol.c_str())) {
 				LOG4CXX_INFO(logger,  name.c_str() << ": Invalid protocol '" << protocol << "'");
 				np->handleDisconnected(user, 1, "Invalid protocol " + protocol);
@@ -464,6 +468,7 @@ class SpectrumNetworkPlugin : public NetworkPlugin {
 			purple_account_set_bool_wrapped(account, "custom_smileys", FALSE);
 			purple_account_set_bool_wrapped(account, "direct_connect", FALSE);
 			purple_account_set_bool_wrapped(account, "compat-verification", TRUE);
+			
 			if (protocol == "prpl-hangouts") {
 				std::string token;
 				if (getUserToken(user, OAUTH_TOKEN, token)) {
@@ -482,6 +487,12 @@ class SpectrumNetworkPlugin : public NetworkPlugin {
 				getUserToken(user, DISCORD_ACCESS_TOKEN, token);
 				if (!token.empty()) {
 					purple_account_set_string_wrapped(account, "token", token.c_str());
+				}
+			}
+			// FIXME!
+			else if (protocol == "prpl-telegram") {
+				if (!password.empty()) {
+					purple_account_set_string_wrapped(account, "password-two-factor", password.c_str());
 				}
 			}
 
@@ -1817,7 +1828,7 @@ void * requestInput(const char *title, const char *primary,const char *secondary
 			return NULL;
 		}
 		else if (primaryString == "Authorization Denied Message:") {
-			LOG4CXX_INFO(logger, "Authorization Deined Message: calling ok_cb(...)");
+			LOG4CXX_INFO(logger, "Authorization Denied Message: calling ok_cb(...)");
 			((PurpleRequestInputCb) ok_cb)(user_data, "Authorization denied.");
 			return NULL;
 		}
@@ -1845,17 +1856,28 @@ void * requestInput(const char *title, const char *primary,const char *secondary
 			np->m_inputRequests[req->mainJID] = req;
 			return NULL;
 		}
-        else if (primaryString == "Enter Discord auth code") {
-            LOG4CXX_INFO(logger, "prpl-discord 2FA request");
-            np->handleMessage(np->m_accounts[account], np->adminLegacyName, std::string("2FA code: "));
-            inputRequest *req = new inputRequest;
-            req->ok_cb = (PurpleRequestInputCb)ok_cb;
-            req->user_data = user_data;
-            req->account = account;
-            req->mainJID = np->m_accounts[account];
-            np->m_inputRequests[req->mainJID] = req;
-            return NULL;
-        }
+		else if (primaryString == "Enter Discord auth code") {
+			LOG4CXX_INFO(logger, "prpl-discord 2FA request");
+			np->handleMessage(np->m_accounts[account], np->adminLegacyName, std::string("2FA code: "));
+			inputRequest *req = new inputRequest;
+			req->ok_cb = (PurpleRequestInputCb)ok_cb;
+			req->user_data = user_data;
+			req->account = account;
+			req->mainJID = np->m_accounts[account];
+			np->m_inputRequests[req->mainJID] = req;
+			return NULL;
+		}
+		else if (primaryString == "Password needed") {
+			LOG4CXX_INFO(logger, "prpl-telegram code request");
+			np->handleMessage(np->m_accounts[account], np->adminLegacyName, std::string("Type login/2FA code: "));
+			inputRequest *req = new inputRequest;
+			req->ok_cb = (PurpleRequestInputCb)ok_cb;
+			req->user_data = user_data;
+			req->account = account;
+			req->mainJID = np->m_accounts[account];
+			np->m_inputRequests[req->mainJID] = req;
+			return NULL;
+		}
 		else {
 			LOG4CXX_WARN(logger, "Unhandled request input. primary=" << primaryString);
 		}
@@ -2294,9 +2316,9 @@ static void signed_on(PurpleConnection *gc, gpointer unused) {
 	else if (CONFIG_STRING(config, "service.protocol") == "prpl-steam-mobile") {
 		storeUserToken(np->m_accounts[account], STEAM_ACCESS_TOKEN, purple_account_get_string_wrapped(account, "access_token", NULL));
 	}
-    else if (CONFIG_STRING(config, "service.protocol") == "prpl-eionrobb-discord") {
-        storeUserToken(np->m_accounts[account], DISCORD_ACCESS_TOKEN, purple_account_get_string_wrapped(account, "token", NULL));
-    }
+	else if (CONFIG_STRING(config, "service.protocol") == "prpl-eionrobb-discord") {
+		storeUserToken(np->m_accounts[account], DISCORD_ACCESS_TOKEN, purple_account_get_string_wrapped(account, "token", NULL));
+	}
 }
 
 static void printDebug(PurpleDebugLevel level, const char *category, const char *arg_s) {
@@ -2473,9 +2495,6 @@ static void transportDataReceived(gpointer data, gint source, PurpleInputConditi
 			firstPing = false;
 			NetworkPlugin::PluginConfig cfg;
 			cfg.setSupportMUC(true);
-			if (CONFIG_STRING(config, "service.protocol") == "prpl-telegram") {
-				cfg.setNeedPassword(false);
-			}
 			if (CONFIG_STRING(config, "service.protocol") == "prpl-hangouts") {
 				cfg.setNeedPassword(false);
 			}
@@ -2526,7 +2545,7 @@ int main(int argc, char **argv) {
 	config = SWIFTEN_SHRPTR_NAMESPACE::shared_ptr<Config>(cfg);
 
 	Logging::initBackendLogging(config.get());
-	if (CONFIG_STRING(config, "service.protocol") == "prpl-hangouts" || CONFIG_STRING(config, "service.protocol") == "prpl-steam-mobile" || CONFIG_STRING(config, "service.protocol") == "prpl-eionrobb-discord") {
+	if (CONFIG_STRING(config, "service.protocol") == "prpl-hangouts" || CONFIG_STRING(config, "service.protocol") == "prpl-steam-mobile" || CONFIG_STRING(config, "service.protocol") == "prpl-eionrobb-discord" ) {
 		storagebackend = StorageBackend::createBackend(config.get(), error);
 		if (storagebackend == NULL) {
 			LOG4CXX_ERROR(logger, "Error creating StorageBackend! " << error);
